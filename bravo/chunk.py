@@ -1,12 +1,16 @@
 from numpy import int8, uint8, uint32
-from numpy import cast, empty, where, zeros
+from numpy import cast, empty, where, zeros, array
 
 from bravo.blocks import glowing_blocks
 from bravo.compat import product
 from bravo.entity import tile_entities
 from bravo.packets import make_packet
 from bravo.serialize import ChunkSerializer
-from bravo.utilities import pack_nibbles
+from bravo.utilities import pack_nibbles, unpack_nibbles
+
+from StringIO import StringIO
+
+from nbt.nbt import NBTFile
 
 # Set up glow tables.
 # These tables provide glow maps for illuminated points.
@@ -110,6 +114,7 @@ class Chunk(ChunkSerializer):
         self.z = int(z)
 
         self.blocks = zeros((16, 16, 128), dtype=uint8)
+
         self.heightmap = zeros((16, 16), dtype=uint8)
         self.blocklight = zeros((16, 16, 128), dtype=uint8)
         self.metadata = zeros((16, 16, 128), dtype=uint8)
@@ -287,13 +292,30 @@ class Chunk(ChunkSerializer):
         Generate a chunk packet.
         """
 
-        array = [chr(i) for i in self.blocks.ravel()]
-        array += pack_nibbles(self.metadata)
-        array += pack_nibbles(self.skylight)
-        array += pack_nibbles(self.blocklight)
+        a = [chr(i) for i in self.blocks.ravel()]
+        a += pack_nibbles(self.metadata)
+        a += pack_nibbles(self.skylight)
+        a += pack_nibbles(self.blocklight)
         packet = make_packet("chunk", x=self.x * 16, y=0, z=self.z * 16,
-            x_size=15, y_size=127, z_size=15, data="".join(array))
+            x_size=15, y_size=127, z_size=15, data="".join(a))
         return packet
+
+    def load_from_packet(self, packet):
+        #index = packet.y + (packet.z * (packet.y_size+1)) + \
+        #    (packet.x * (packet.y_size+1) * (packet.z_size+1))
+
+        self.x = packet.x / 16
+        self.z = packet.z / 16
+
+        index = (packet.x_size + 1) * (packet.z_size + 1) * (packet.y_size + 1)
+
+        try:
+            self.blocks.ravel()[:] = [ ord(x) for x in packet.data[:index] ]
+            self.metadata.ravel()[:] = unpack_nibbles(packet.data[index:index+index/2])
+            self.skylight.ravel()[:] = unpack_nibbles(packet.data[index+index/2:index*2])
+            self.blocklight.ravel()[:] = unpack_nibbles(packet.data[index*2:])
+        except ValueError:
+            print "ValueError!  Cannot load from packet.  (seems to be a bug)"   
 
     def get_block(self, coords):
         """

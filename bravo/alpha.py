@@ -30,21 +30,21 @@ class Location(object):
 
     __str__ = __repr__
 
-    @property
-    def yaw(self):
+    def yaw_getter(self):
         return degrees(self.theta)
 
-    @yaw.setter
-    def yaw(self, value):
+    def yaw_setter(self, value):
         self.theta = radians(value)
 
-    @property
-    def pitch(self):
+    yaw = property(yaw_getter, yaw_setter)
+
+    def pitch_getter(self):
         return degrees(self.phi)
 
-    @pitch.setter
-    def pitch(self, value):
+    def pitch_setter(self, value):
         self.phi = radians(value)
+
+    pitch = property(pitch_getter, pitch_setter)
 
     def load_from_packet(self, container):
         """
@@ -67,12 +67,19 @@ class Location(object):
         if hasattr(container, "flying"):
             self.midair = bool(container.flying)
 
+    def build_containers(self):
+        position = Container(x=self.x, y=self.stance, z=self.z, stance=self.y)
+        look = Container(rotation=self.yaw, pitch=self.pitch)
+        flying = Container(flying=self.midair)
+       
+        return position, look, flying 
+
     def save_to_packet(self):
         """
         Returns a position/look/flying packet.
         """
 
-        position = Container(x=self.x, y=self.y, z=self.z, stance=self.stance)
+        position = Container(x=self.x, y=self.stance, z=self.z, stance=self.y)
         look = Container(rotation=self.yaw, pitch=self.pitch)
         flying = Container(flying=self.midair)
 
