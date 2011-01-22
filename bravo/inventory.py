@@ -1,18 +1,58 @@
-from itertools import chain
+from itertools import chain, izip_longest
 
 from construct import Container, ListContainer
 
-from bravo.compat import product
 from bravo.ibravo import IRecipe
 from bravo.packets import make_packet
 from bravo.plugin import retrieve_plugins
 from bravo.serialize import InventorySerializer
 
+def grouper(n, iterable, fillvalue=None):
+    "grouper(3, 'ABCDEFG', 'x') --> ABC DEF Gxx"
+    args = [iter(iterable)] * n
+    return izip_longest(fillvalue=fillvalue, *args)
+
+def pad_to_stride(recipe, rstride, cstride):
+    """
+    Pad a recipe out to a given stride.
+
+    :param tuple recipe: a recipe
+    :param int rstride: stride of the recipe
+    :param int cstride: stride of the crafting table
+    """
+
+    if rstride > cstride:
+        raise ValueError("Recipe is wider than crafting!")
+
+    pad = (None,) * (cstride - rstride)
+    g = grouper(rstride, recipe)
+    padded = list(next(g))
+    for row in g:
+        padded.extend(pad)
+        padded.extend(row)
+
+    return padded
+
 class Inventory(InventorySerializer):
     """
-    Item manager for a player.
+    Item manager.
 
-    The ``Inventory`` covers a player's armor, crafting box, and inventory.
+    The ``Inventory`` covers all kinds of inventory and crafting windows,
+    ranging from user inventories to furnaces to workbenches. It is completely
+    extensible and customizeable.
+
+    The main concept of the ``Inventory`` lies in **slots**, which are boxes
+    capable of holding items, and **tables**, which are groups of slots with
+    an associated semantic meaning. Currently, ``Inventory`` supports four
+    tables:
+
+     * Crafting: A rectangular arrangement of slots which can be used to
+       transmute items. Crafting tables are always preceded by a single slot
+       which is used for the output of the crafting table.
+     * Armor: A set of slots used to equip armor.
+     * Storage: A generalized table for storing arbitrary items. This is the
+       main region of chests and player inventories.
+     * Holdables: A region mapped to a player's usable items.
     """
 
     crafting = 0
@@ -27,11 +67,6 @@ class Inventory(InventorySerializer):
             self.crafted = [None]
         else:
             self.crafting = self.crafted = []
-
-        self.crafting_table = {}
-        """
-        A two-dimensional table for quickly and cleanly doing crafting.
-        """
 
         if self.armor:
             self.armor = [None] * self.armor
@@ -59,25 +94,12 @@ class Inventory(InventorySerializer):
         retval += len(self.storage) + len(self.holdables)
         return retval
 
-    def fill_crafting_table(self):
-        """
-        Copy the crafting array into the crafting table.
-        """
-
-        for i, slot in enumerate(self.crafting):
-            self.crafting_table[divmod(i, self.crafting_stride)] = slot
-
-    def sync_crafting_table(self):
-        """
-        Copy the crafting table into the crafting array.
-        """
-
-        for i, slot in self.crafting_table.iteritems():
-            self.crafting[i[0] * self.crafting_stride + i[1]] = slot
-
     def container_for_slot(self, slot):
         """
-        Retrieve the list and index for a given slot.
+        Retrieve the table and index for a given slot.
+
+        There is an isomorphism here which allows all of the tables of this
+        ``Inventory`` to be viewed as a single large table of slots.
         """
 
         metalist = [self.crafted, self.crafting, self.armor, self.storage,
@@ -189,6 +211,10 @@ class Inventory(InventorySerializer):
         """
         Handle a slot selection.
 
+        This method implements the basic public interface for interacting with
+        ``Inventory`` objects. It is directly equivalent to mouse clicks made
+        upon slots.
+
         :param int slot: which slot was selected
         :param bool alternate: whether the selection is alternate; e.g., if it
                                was done with a right-click
@@ -198,17 +224,27 @@ class Inventory(InventorySerializer):
 
         if l is self.crafted:
             # Special case for crafted output.
-            if self.selected is None and self.recipe and self.crafted[0]:
-                self.selected = self.crafted[0]
-
-                self.reduce_recipe()
-                self.sync_crafting_table()
-                primary, secondary, count = self.crafted[0]
-                count -= self.recipe.provides[1]
-                if count <= 0:
+            if self.recipe and self.crafted[0]:
+                if self.selected is None:
+                    self.selected = self.crafted[0]
                     self.crafted[0] = None
                 else:
-                    self.crafted[0] = primary, secondary, count
+                    sprimary, ssecondary, scount = self.selected
+                    if (sprimary, ssecondary) == self.recipe.provides[0]:
+                        scount += self.recipe.provides[1]
+                        self.selected = sprimary, ssecondary, scount
+                    else:
+                        # Mismatch; don't allow it.
+                        return False
+
+                self.reduce_recipe()
+                self.check_recipes()
+                if self.recipe is None:
+                    self.crafted[0] = None
+                else:
+                    provides = self.recipe.provides
+                    self.crafted[0] = provides[0][0], provides[0][1], provides[1]
+
                 return True
             else:
                 # Forbid placing things in the crafted slot.
@@ -260,13 +296,12 @@ class Inventory(InventorySerializer):
         # is just a state update.
         if l is self.crafting:
             # Crafting table changed...
-            self.fill_crafting_table()
             self.check_recipes()
             if self.recipe is None:
                 self.crafted[0] = None
             else:
-                crafted = self.apply_recipe()
-                self.crafted[0] = crafted[0][0], crafted[0][1], crafted[1]
+                provides = self.recipe.provides
+                self.crafted[0] = provides[0][0], provides[0][1], provides[1]
 
         return True
 
@@ -279,27 +314,32 @@ class Inventory(InventorySerializer):
 
         # This isn't perfect, unfortunately, but correctness trumps algorithmic
         # perfection. (For now.)
-        crafting = self.crafting_table
-        for recipe in retrieve_plugins(IRecipe).itervalues():
+        for name, recipe in sorted(retrieve_plugins(IRecipe).iteritems()):
             dims = recipe.dimensions
 
-            for x, y in crafting.iterkeys():
-                if (x + dims[1] > self.crafting_stride or
-                    y + dims[0] > self.crafting_stride):
+            # Skip recipes that don't fit our crafting table.
+            if (dims[0] > self.crafting_stride or
+                dims[1] > len(self.crafting) // self.crafting_stride):
+                continue
+
+            padded = pad_to_stride(recipe.recipe, dims[0],
+                self.crafting_stride)
+
+            for offset in range(len(self.crafting) - len(padded) + 1):
+                nones = self.crafting[:offset]
+                nones += self.crafting[len(padded) + offset:]
+                if not all(i is None for i in nones):
                     continue
 
-                indices = product(xrange(x, x + dims[1]),
-                    xrange(y, y + dims[0]))
+                matches_needed = len(padded)
 
-                matches_needed = dims[0] * dims[1]
-
-                for index, slot in zip(indices, recipe.recipe):
-
-                    if crafting[index] is None and slot is None:
+                for i, j in zip(padded,
+                    self.crafting[offset:len(padded) + offset]):
+                    if i is None and j is None:
                         matches_needed -= 1
-                    elif crafting[index] is not None and slot is not None:
-                        cprimary, csecondary, ccount = crafting[index]
-                        skey, scount = slot
+                    elif i is not None and j is not None:
+                        cprimary, csecondary, ccount = j
+                        skey, scount = i
                         if ((cprimary, csecondary) == skey
                             and ccount >= scount):
                             matches_needed -= 1
@@ -307,35 +347,10 @@ class Inventory(InventorySerializer):
                     if matches_needed == 0:
                         # Jackpot!
                         self.recipe = recipe
-                        self.recipe_offset = (x, y)
+                        self.recipe_offset = offset
                         return
 
         self.recipe = None
-
-    def apply_recipe(self):
-        """
-        Return the crafted output of an applied recipe.
-
-        This function assumes that the recipe already fits the crafting table and
-        will not do additional checks to verify this assumption.
-        """
-
-        crafting = self.crafting_table
-        offset = self.recipe_offset
-        dims = self.recipe.dimensions
-        indices = product(xrange(offset[0], offset[0] + dims[1]),
-            xrange(offset[1], offset[1] + dims[0]))
-        count = []
-
-        for index, slot in zip(indices, self.recipe.recipe):
-            if slot is not None and crafting[index] is not None:
-                scount = slot[1]
-                tcount = crafting[index][2]
-                count.append(tcount // scount)
-
-        counted = min(count)
-        if counted > 0:
-            return self.recipe.provides[0], self.recipe.provides[1] * counted
 
     def reduce_recipe(self):
         """
@@ -343,25 +358,27 @@ class Inventory(InventorySerializer):
 
         This function returns None; the crafting table is modified in-place.
 
-        This function assumes that the recipe already fits the crafting table and
-        will not do additional checks to verify this assumption.
+        This function assumes that the recipe already fits the crafting table
+        and will not do additional checks to verify this assumption.
         """
 
-        crafting = self.crafting_table
         offset = self.recipe_offset
-        dims = self.recipe.dimensions
-        indices = product(xrange(offset[0], offset[0] + dims[1]),
-            xrange(offset[1], offset[1] + dims[0]))
 
-        for index, slot in zip(indices, self.recipe.recipe):
+        padded = pad_to_stride(self.recipe.recipe, self.recipe.dimensions[0],
+            self.crafting_stride)
+
+        for index, slot in enumerate(padded):
             if slot is not None:
-                scount = slot[1]
-                primary, secondary, tcount = crafting[index]
-                tcount -= scount
-                if tcount:
-                    crafting[index] = primary, secondary, tcount
+                index += offset
+                rcount = slot[1]
+                primary, secondary, ccount = self.crafting[index]
+                ccount -= rcount
+                if ccount:
+                    self.crafting[index] = primary, secondary, ccount
                 else:
-                    crafting[index] = None
+                    self.crafting[index] = None
+
+
 
 class Equipment(Inventory):
 

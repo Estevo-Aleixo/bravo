@@ -1,4 +1,4 @@
-# from fractions import Fraction
+from __future__ import division
 
 class Block(object):
     """
@@ -19,7 +19,7 @@ class Block(object):
         "slot",
     )
 
-    def __init__(self, slot, name, drop=None, replace=0, ratio=None,
+    def __init__(self, slot, name, drop=None, replace=0, ratio=1,
             quantity=1):
         """
         A block in a chunk.
@@ -36,9 +36,8 @@ class Block(object):
             replace : int
                 The type of block to place in the map when instances of this
                 block are destroyed. Defaults to air.
-            ratio : `Fraction`
-                The probability of this block dropping a block on destruction,
-                or None if this block always drops a block when destroyed.
+            ratio : float
+                The probability of this block dropping a block on destruction.
             quantity : int
                 The number of blocks dropped when this block is destroyed.
         """
@@ -102,11 +101,11 @@ block_names = [
     "leaves",
     "sponge",
     "glass",
-    "red-cloth",
-    "orange-cloth",
-    "yellow-cloth",
-    "lime-cloth",
-    "green-cloth",
+    "lapis-lazuli-ore",
+    "lapis-lazuli",
+    "dispenser",
+    "sandstone",
+    "note-block",
     "aqua-cloth",
     "cyan-cloth",
     "blue-cloth",
@@ -117,7 +116,7 @@ block_names = [
     "pink-cloth",
     "black-cloth",
     "grey-cloth",
-    "white-cloth",
+    "wool",
     "flower",
     "rose",
     "brown-mushroom",
@@ -164,7 +163,7 @@ block_names = [
     "snow-block",
     "cactus",
     "clay",
-    "reed",
+    "sugar-cane",
     "jukebox",
     "fence",
     "pumpkin",
@@ -173,18 +172,114 @@ block_names = [
     "lightstone",
     "portal",
     "jack-o-lantern",
-]
-
-item_names3 = [
-    "coal",
-]
-
-item_names2 = [
-    "stick",
+    "cake",
 ]
 
 item_names = [
+    "iron-shovel",
+    "iron-pickaxe",
+    "iron-axe",
+    "flint-and-steel",
+    "apple",
+    "bow",
+    "arrow",
+    "coal",
+    "diamond",
+    "iron-ingot",
+    "gold-ingot",
+    "iron-sword",
+    "wooden-sword",
+    "wooden-shovel",
+    "wooden-pickaxe",
+    "wooden-axe",
+    "stone-sword",
+    "stone-shovel",
+    "stone-pickaxe",
+    "stone-axe",
+    "diamond-sword",
+    "diamond-shovel",
+    "diamond-pickaxe",
+    "diamond-axe",
+    "stick",
+    "bowl",
+    "mushroom-soup",
+    "gold-sword",
+    "gold-shovel",
+    "gold-pickaxe",
+    "gold-axe",
+    "string",
+    "feather",
+    "sulphur",
+    "wooden-hoe",
+    "stone-hoe",
+    "iron-hoe",
+    "diamond-hoe",
+    "gold-hoe",
+    "seeds",
+    "wheat",
+    "bread",
+    "leather-helmet",
+    "leather-chestplate",
+    "leather-leggings",
+    "leather-boots",
+    "chainmail-helmet",
+    "chainmail-chestplate",
+    "chainmail-leggings",
+    "chainmail-boots",
+    "iron-helmet",
+    "iron-chestplate",
+    "iron-leggings",
+    "iron-boots",
+    "diamond-helmet",
+    "diamond-chestplate",
+    "diamond-leggings",
+    "diamond-boots",
+    "gold-helmet",
+    "gold-chestplate",
+    "gold-leggings",
+    "gold-boots",
+    "flint",
+    "raw-porkchop",
+    "cooked-porkchop",
+    "paintings",
+    "golden-apple",
     "sign",
+    "wooden-door",
+    "bucket",
+    "water-bucket",
+    "lava-bucket",
+    "mine-cart",
+    "saddle",
+    "iron-door",
+    "redstone",
+    "snowball",
+    "boat",
+    "leather",
+    "milk",
+    "clay-brick",
+    "clay-balls",
+    "sugar-cane",
+    "paper",
+    "book",
+    "slimeball",
+    "storage-minecart",
+    "powered-minecart",
+    "egg",
+    "compass",
+    "fishing-rod",
+    "clock",
+    "glowstone-dust",
+    "raw-fish",
+    "cooked-fish",
+    "ink-sack",
+    "bone",
+    "sugar",
+    "cake",
+]
+
+special_item_names = [
+    "gold-music-disc",
+    "green-music-disc",
 ]
 
 drops = {}
@@ -218,7 +313,7 @@ replaces[79] = 8 # Ice -> Water
 
 ratios = {}
 
-#ratios[18] = Fraction(1, 9) # Leaves
+ratios[18] = 1 / 9 # Leaves
 
 quantities = {}
 
@@ -253,26 +348,16 @@ for i, name in enumerate(block_names):
     blocks[i] = b
     blocks[name] = b
 
-for i, name in enumerate(item_names3):
-    kwargs = {}
-    # 256 for item slots; 2nd offset should go away at some point
-    i += 256 + 0x7
-    item = Item(i, name, **kwargs)
-    items[i] = item
-    items[name] = item
-
-for i, name in enumerate(item_names2):
-    kwargs = {}
-    # 256 for item slots; 2nd offset should go away at some point
-    i += 256 + 0x18
-    item = Item(i, name, **kwargs)
-    items[i] = item
-    items[name] = item
-
 for i, name in enumerate(item_names):
     kwargs = {}
-    # 256 for item slots; 2nd offset should go away at some point
-    i += 256 + 0x43
+    i += 0x100
+    item = Item(i, name, **kwargs)
+    items[i] = item
+    items[name] = item
+
+for i, name in enumerate(special_item_names):
+    kwargs = {}
+    i += 0x8D0
     item = Item(i, name, **kwargs)
     items[i] = item
     items[name] = item

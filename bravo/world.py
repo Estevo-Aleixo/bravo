@@ -13,6 +13,7 @@ from bravo.chunk import Chunk
 from bravo.config import configuration
 from bravo.serialize import LevelSerializer
 from bravo.serialize import read_from_file, write_to_file, extension
+from bravo.utilities import split_coords
 
 try:
     from ampoule import deferToAMPProcess
@@ -20,8 +21,6 @@ try:
     async = configuration.getboolean("bravo", "ampoule")
 except ImportError:
     async = False
-
-async = True
 
 def base36(i):
     """
@@ -185,24 +184,18 @@ class World(LevelSerializer):
         """
 
         if not async:
-            print "wait!"
-            return deferLater(reactor, 0.000001, self.load_chunk, x, z)
+            return deferLater(reactor, 0.000001, self.factory.world.load_chunk,
+                x, z)
 
         if (x, z) in self.chunk_cache:
-            print "in cache", x, z
             return succeed(self.chunk_cache[x, z])
         elif (x, z) in self.dirty_chunk_cache:
-            print "dirty", x, z
             return succeed(self.dirty_chunk_cache[x, z])
         elif (x, z) in self._pending_chunks:
-            print "pending", x, z
             # Rig up another Deferred and wrap it up in a to-go box.
             d = Deferred()
             self._pending_chunks[x, z].chainDeferred(d)
             return d
-
-        print "cannot create chunks on client side"
-        raise ValueError
 
         chunk = Chunk(x, z)
 
@@ -238,8 +231,8 @@ class World(LevelSerializer):
             chunk.dirty = True
 
             # Apply the current season to the chunk.
-            #if self.season:
-            #    self.season.transform(chunk)
+            if self.season:
+                self.season.transform(chunk)
 
             # Since this chunk hasn't been given to any player yet, there's no
             # conceivable way that any meaningful damage has been accumulated;
@@ -347,3 +340,47 @@ class World(LevelSerializer):
             f.makedirs()
         f = f.child("%s%s" % (username, extension()))
         write_to_file(player.save_to_tag(), f.open("w"))
+
+    def get_block(self, coords):
+        """
+        Get a block from an unknown chunk.
+        """
+
+        x, y, z = coords
+
+        bigx, smallx, bigz, smallz = split_coords(x, z)
+        chunk = self.load_chunk(bigx, bigz)
+        return chunk.get_block((smallx, y, smallz))
+
+    def set_block(self, coords, value):
+        """
+        Set a block in an unknown chunk.
+        """
+
+        x, y, z = coords
+
+        bigx, smallx, bigz, smallz = split_coords(x, z)
+        chunk = self.load_chunk(bigx, bigz)
+        chunk.set_block((smallx, y, smallz), value)
+
+    def get_metadata(self, coords):
+        """
+        Get a block's metadata from an unknown chunk.
+        """
+
+        x, y, z = coords
+
+        bigx, smallx, bigz, smallz = split_coords(x, z)
+        chunk = self.load_chunk(bigx, bigz)
+        return chunk.get_metadata((smallx, y, smallz))
+
+    def set_metadata(self, coords, value):
+        """
+        Set a block's metadata in an unknown chunk.
+        """
+
+        x, y, z = coords
+
+        bigx, smallx, bigz, smallz = split_coords(x, z)
+        chunk = self.load_chunk(bigx, bigz)
+        chunk.set_metadata((smallx, y, smallz), value)

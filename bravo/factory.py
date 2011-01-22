@@ -1,9 +1,11 @@
 from math import sqrt
 from time import time
 
+from twisted.internet.interfaces import IPushProducer
 from twisted.internet.protocol import Factory
 from twisted.internet.task import LoopingCall
 from twisted.python import log
+from zope.interface import implements
 
 from bravo.config import configuration
 from bravo.entity import Pickup, Player
@@ -11,6 +13,7 @@ from bravo.ibravo import IAuthenticator, ISeason, ITerrainGenerator
 from bravo.packets import make_packet
 from bravo.plugin import retrieve_named_plugins
 from bravo.protocol import BetaProtocol
+from bravo.utilities import chat_name, sanitize_chat
 from bravo.world import World
 
 from bravo.plugin import retrieve_plugins
@@ -27,6 +30,8 @@ class BetaFactory(Factory):
     """
     A ``Factory`` that creates ``BetaProtocol`` objects when connected to.
     """
+
+    implements(IPushProducer)
 
     protocol = BetaProtocol
 
@@ -64,7 +69,7 @@ class BetaFactory(Factory):
         self.time_loop = LoopingCall(self.update_time)
         self.time_loop.start(2)
 
-        authenticator = configuration.get("bravo", "authenticator")
+        authenticator = configuration.get("world %s" % name, "authenticator")
         selected = retrieve_named_plugins(IAuthenticator, [authenticator])[0]
 
         log.msg("Using authenticator %s" % selected.name)
@@ -76,6 +81,8 @@ class BetaFactory(Factory):
 
         log.msg("Using generators %s" % ", ".join(i.name for i in generators))
         self.world.pipeline = generators
+
+        self.chat_consumers = set()
 
         log.msg("Factory successfully initialized for world '%s'!" % name)
 
@@ -130,6 +137,25 @@ class BetaFactory(Factory):
             if plugin.day == self.day:
                 self.world.season = plugin
 
+    def chat(self, message):
+        """
+        Relay chat messages.
+
+        Chat messages are sent to all connected clients, as well as to anybody
+        consuming this factory.
+        """
+
+        for consumer in self.chat_consumers:
+            consumer.write((self, message))
+
+        # Prepare the message for chat packeting.
+        for user in self.protocols:
+            message = message.replace(user, chat_name(user))
+        message = sanitize_chat(message)
+
+        packet = make_packet("chat", message=message)
+        self.broadcast(packet)
+
     def broadcast(self, packet):
         for player in self.protocols.itervalues():
             player.transport.write(packet)
@@ -144,6 +170,18 @@ class BetaFactory(Factory):
         for player in self.protocols.itervalues():
             if (x, z) in player.chunks:
                 player.transport.write(packet)
+
+    def flush_chunk(self, chunk):
+        """
+        Flush a damaged chunk to all players that have it loaded.
+        """
+
+        if chunk.is_damaged():
+            packet = chunk.get_damage_packet()
+            for player in self.protocols.itervalues():
+                if (chunk.x, chunk.z) in player.chunks:
+                    player.transport.write(packet)
+            chunk.clear_damage()
 
     def entities_near(self, x, y, z, radius):
         """
@@ -184,3 +222,12 @@ class BetaFactory(Factory):
 
         packet = make_packet("create", eid=entity.eid)
         self.broadcast(packet)
+
+    def pauseProducing(self):
+        pass
+
+    def resumeProducing(self):
+        pass
+
+    def stopProducing(self):
+        pass

@@ -1,12 +1,12 @@
 from numpy import int8, uint8, uint32
-from numpy import cast, empty, where, zeros, array, fromstring
+from numpy import cast, empty, where, zeros, fromstring
 
 from bravo.blocks import glowing_blocks
 from bravo.compat import product
 from bravo.entity import tile_entities
 from bravo.packets import make_packet
 from bravo.serialize import ChunkSerializer
-from bravo.utilities import pack_nibbles, unpack_nibbles
+from bravo.utilities import pack_nibbles
 
 # Set up glow tables.
 # These tables provide glow maps for illuminated points.
@@ -109,7 +109,7 @@ class Chunk(ChunkSerializer):
         self.x = int(x)
         self.z = int(z)
 
-        self.blocks = empty((16, 16, 128), dtype=uint8)
+        self.blocks = zeros((16, 16, 128), dtype=uint8)
         self.heightmap = zeros((16, 16), dtype=uint8)
         self.blocklight = zeros((16, 16, 128), dtype=uint8)
         self.metadata = zeros((16, 16, 128), dtype=uint8)
@@ -288,7 +288,6 @@ class Chunk(ChunkSerializer):
         """
 
         array = self.blocks.tostring()
-    
         array += pack_nibbles(self.metadata)
         array += pack_nibbles(self.skylight)
         array += pack_nibbles(self.blocklight)
