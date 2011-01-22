@@ -1,5 +1,5 @@
 from numpy import int8, uint8, uint32
-from numpy import cast, empty, where, zeros, array
+from numpy import cast, empty, where, zeros, array, fromstring
 
 from bravo.blocks import glowing_blocks
 from bravo.compat import product
@@ -7,10 +7,6 @@ from bravo.entity import tile_entities
 from bravo.packets import make_packet
 from bravo.serialize import ChunkSerializer
 from bravo.utilities import pack_nibbles, unpack_nibbles
-
-from StringIO import StringIO
-
-from nbt.nbt import NBTFile
 
 # Set up glow tables.
 # These tables provide glow maps for illuminated points.
@@ -113,8 +109,7 @@ class Chunk(ChunkSerializer):
         self.x = int(x)
         self.z = int(z)
 
-        self.blocks = zeros((16, 16, 128), dtype=uint8)
-
+        self.blocks = empty((16, 16, 128), dtype=uint8)
         self.heightmap = zeros((16, 16), dtype=uint8)
         self.blocklight = zeros((16, 16, 128), dtype=uint8)
         self.metadata = zeros((16, 16, 128), dtype=uint8)
@@ -292,30 +287,87 @@ class Chunk(ChunkSerializer):
         Generate a chunk packet.
         """
 
-        a = [chr(i) for i in self.blocks.ravel()]
-        a += pack_nibbles(self.metadata)
-        a += pack_nibbles(self.skylight)
-        a += pack_nibbles(self.blocklight)
+        array = self.blocks.tostring()
+    
+        array += pack_nibbles(self.metadata)
+        array += pack_nibbles(self.skylight)
+        array += pack_nibbles(self.blocklight)
         packet = make_packet("chunk", x=self.x * 16, y=0, z=self.z * 16,
-            x_size=15, y_size=127, z_size=15, data="".join(a))
+            x_size=15, y_size=127, z_size=15, data=array)
         return packet
 
     def load_from_packet(self, packet):
-        #index = packet.y + (packet.z * (packet.y_size+1)) + \
-        #    (packet.x * (packet.y_size+1) * (packet.z_size+1))
+        cx, bx = divmod(packet.x, 16)
+        cz, bz = divmod(packet.z, 16)
 
-        self.x = packet.x / 16
-        self.z = packet.z / 16
+        if (cx != self.x) or (cz != self.z):
+            print "loading packet data in wrong chunk location"
+            print cx, cz, self.x, self.z
+            return
 
-        index = (packet.x_size + 1) * (packet.z_size + 1) * (packet.y_size + 1)
+        # server always sends the size - 1
+        x_size = packet.x_size + 1
+        y_size = packet.y_size + 1
+        z_size = packet.z_size + 1
 
-        try:
-            self.blocks.ravel()[:] = [ ord(x) for x in packet.data[:index] ]
-            self.metadata.ravel()[:] = unpack_nibbles(packet.data[index:index+index/2])
-            self.skylight.ravel()[:] = unpack_nibbles(packet.data[index+index/2:index*2])
-            self.blocklight.ravel()[:] = unpack_nibbles(packet.data[index*2:])
-        except ValueError:
-            print "ValueError!  Cannot load from packet.  (seems to be a bug)"   
+        # index for reading the packet data
+        p_index = x_size * z_size * y_size
+
+        # index for modifying the chunk
+        #c_index = packet.y + (bz * y_size) + (bx * y_size * z_size)
+
+        # im sure there is a faster operation in numpy than this
+        # and by this i mean, the rest of this function
+        data = fromstring(packet.data, dtype=uint8)
+       
+        x = bx
+        z = bz
+        y = packet.y
+
+        sky_index = p_index + p_index / 2
+        light_index = p_index * 2
+
+        x_size -= 1
+        z_size -= 1
+        y_size -= 1
+
+        for i in xrange(p_index):
+            #print x, z, y, x_size, z_size, y_size
+            self.blocks[x, z, y] = data[i]
+
+            # the remaining data is packed as nibbles
+            # so don't advance as quickly as i
+            i2 = i / 2
+
+            # track if we should use the nibble given to us
+            # or to use the one in the buffer
+            nibble = i % 2
+
+            # metadata, skylight, and blocklight all are packed
+            if nibble:
+                self.metadata[x,z,y] = meta_pb
+                #self.skylight[x,z,y] = sky_pb
+                #self.blocklight[x,z,y] = light_pb
+            else:
+                m = data[i2 + p_index]
+                self.metadata[x,z,y] = m >> 4
+                meta_pb = m & 15
+
+                #s = data[i2 + sky_index]
+                #self.skylight[x,z,y] = s >> 4
+                #sky_pb = s & 15
+
+                #l = data[i2 + light_index]
+                #self.blocklight[x,z,y] = l >> 4
+                #light_pb = l & 15
+
+            y += 1
+            if y > y_size:
+                z += 1
+                y = 0
+            if z > z_size:
+                x += 1
+                z = 0
 
     def get_block(self, coords):
         """

@@ -1,4 +1,4 @@
-from fractions import Fraction
+# from fractions import Fraction
 
 class Block(object):
     """
@@ -11,6 +11,7 @@ class Block(object):
 
     __slots__ = (
         "drop",
+        "key",
         "name",
         "quantity",
         "ratio",
@@ -45,6 +46,9 @@ class Block(object):
         self.slot = slot
         self.name = name
 
+        # XXX
+        self.key = (self.slot, 0)
+
         if drop is None:
             self.drop = slot
         else:
@@ -60,6 +64,7 @@ class Item(object):
     """
 
     __slots__ = (
+        "key",
         "name",
         "slot",
     )
@@ -71,6 +76,9 @@ class Item(object):
 
         self.slot = slot
         self.name = name
+
+        # XXX
+        self.key = (self.slot, 0)
 
 block_names = [
     "air",
@@ -210,7 +218,7 @@ replaces[79] = 8 # Ice -> Water
 
 ratios = {}
 
-ratios[18] = Fraction(1, 9) # Leaves
+#ratios[18] = Fraction(1, 9) # Leaves
 
 quantities = {}
 

@@ -1,9 +1,8 @@
 from time import time
 
-from twisted.internet import reactor
 from twisted.internet.defer import succeed
 from twisted.internet.protocol import Protocol
-from twisted.internet.task import cooperate, deferLater, LoopingCall
+from twisted.internet.task import cooperate, LoopingCall
 from twisted.internet.task import TaskDone, TaskFailed
 from twisted.python import log
 
@@ -31,12 +30,6 @@ from the center.
 """
 
 BuildData = namedtuple("BuildData", "block, metadata, x, y, z, face")
-
-try:
-    import ampoule
-    async = configuration.getboolean("bravo", "ampoule")
-except ImportError:
-    async = False
 
 class BetaProtocol(Protocol):
     """
@@ -70,6 +63,8 @@ class BetaProtocol(Protocol):
 
         self.handlers = {
             0: self.ping,
+            1: self.login,
+            2: self.handshake,
             3: self.chat,
             10: self.flying,
             11: self.position_look,
@@ -78,6 +73,7 @@ class BetaProtocol(Protocol):
             14: self.digging,
             15: self.build,
             16: self.equip,
+            18: self.animate,
             21: self.pickup,
             101: self.wclose,
             102: self.waction,
@@ -96,6 +92,31 @@ class BetaProtocol(Protocol):
 
     def ping(self, container):
         pass
+
+    def login(self, container):
+        """
+        Handle a login packet.
+
+        This method wraps a login hook which is permitted to do just about
+        anything, as long as it's asynchronous. The hook returns a
+        ``Deferred``, which is chained to authenticate the user or disconnect
+        them depending on the results of the authentication.
+        """
+
+        if container.protocol < 8:
+            # Kick old clients.
+            self.error("This server doesn't support your ancient client.")
+        elif container.protocol > 8:
+            # Kick new clients.
+            self.error("This server doesn't support your newfangled client.")
+
+        d = self.factory.login_hook(self, container)
+        d.addErrback(lambda *args, **kwargs: self.transport.loseConnection())
+        d.addCallback(lambda *args, **kwargs: self.authenticated())
+
+    def handshake(self, container):
+        if not self.factory.handshake_hook(self, container):
+            self.loseConnection()
 
     def colorize_chat(self, message):
         for user in self.factory.protocols:
@@ -238,7 +259,7 @@ class BetaProtocol(Protocol):
             return
 
         # Ignore clients that think -1 is placeable.
-        if container.id == -1:
+        if container.primary == -1:
             return
 
         # Special case when face is "noop": Update the status of the currently
@@ -246,13 +267,13 @@ class BetaProtocol(Protocol):
         if container.face == "noop":
             return
 
-        if container.id in blocks:
-            block = blocks[container.id]
-        elif container.id in items:
-            block = items[container.id]
+        if container.primary in blocks:
+            block = blocks[container.primary]
+        elif container.primary in items:
+            block = items[container.primary]
         else:
             log.err("Ignoring request to place unknown block %d" %
-                container.id)
+                container.primary)
             return
 
         if time() - self.last_dig_build_timer < 0.1:
@@ -286,7 +307,10 @@ class BetaProtocol(Protocol):
 
     def pickup(self, container):
         self.factory.give((container.x, container.y, container.z),
-            container.item, container.count)
+            (container.primary, container.secondary), container.count)
+
+    def animate(self, container):
+        pass
 
     def wclose(self, container):
         if container.wid in self.windows:
@@ -377,12 +401,7 @@ class BetaProtocol(Protocol):
         if (x, z) in self.chunks:
             return succeed(None)
 
-        if async:
-            d = self.factory.world.request_chunk(x, z)
-        else:
-            d = deferLater(reactor, 0.000001, self.factory.world.load_chunk,
-                x, z)
-
+        d = self.factory.world.request_chunk(x, z)
         d.addCallback(self.send_chunk)
 
         return d
@@ -406,9 +425,7 @@ class BetaProtocol(Protocol):
         packets, self.buf = parse_packets(self.buf)
 
         for header, payload in packets:
-            if header in self.factory.hooks:
-                self.factory.hooks[header](self, payload)
-            elif header in self.handlers:
+            if header in self.handlers:
                 self.handlers[header](payload)
             else:
                 log.err("Didn't handle parseable packet %d!" % header)
@@ -459,7 +476,16 @@ class BetaProtocol(Protocol):
         bigx, smallx, bigz, smallz = split_coords(self.player.location.x,
             self.player.location.z)
 
-        d = self.enable_chunk(bigx, bigz)
+        # Spawn the 25 chunks in a square around the spawn, *before* spawning
+        # the player. Otherwise, there's a funky Beta 1.2 bug which causes the
+        # player to not be able to move.
+        d = cooperate(
+            self.enable_chunk(i, j)
+            for i, j in product(
+                xrange(bigx - 3, bigx + 3),
+                xrange(bigz - 3, bigz + 3)
+            )
+        ).whenDone()
 
         # Don't dare send more chunks beyond the initial one until we've
         # spawned.

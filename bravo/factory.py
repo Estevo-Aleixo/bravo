@@ -3,6 +3,7 @@ from time import time
 
 from twisted.internet.protocol import Factory
 from twisted.internet.task import LoopingCall
+from twisted.python import log
 
 from bravo.config import configuration
 from bravo.entity import Pickup, Player
@@ -33,9 +34,28 @@ class BetaFactory(Factory):
     time = 0
     day = 0
 
-    def __init__(self):
-        self.world = World("world")
+    handshake_hook = None
+    login_hook = None
+
+    def __init__(self, name):
+        """
+        Create a factory and world.
+
+        ``name`` is the string used to look up factory-specific settings from
+        the configuration.
+
+        :param str name: internal name of this factory
+        """
+
+        log.msg("Initializing factory for world '%s'..." % name)
+
+        self.name = name
+        self.port = configuration.getint("world %s" % name, "port")
+
+        world_folder = configuration.get("world %s" % name, "path")
+        self.world = World(world_folder)
         self.world.factory = self
+
         self.protocols = dict()
 
         self.eid = 1
@@ -44,22 +64,20 @@ class BetaFactory(Factory):
         self.time_loop = LoopingCall(self.update_time)
         self.time_loop.start(2)
 
-        self.hooks = {}
-
         authenticator = configuration.get("bravo", "authenticator")
         selected = retrieve_named_plugins(IAuthenticator, [authenticator])[0]
 
-        print "Using authenticator %s" % selected.name
-        self.hooks[2] = selected.handshake
-        self.hooks[1] = selected.login
+        log.msg("Using authenticator %s" % selected.name)
+        self.handshake_hook = selected.handshake
+        self.login_hook = selected.login
 
         generators = configuration.get("bravo", "generators").split(",")
         generators = retrieve_named_plugins(ITerrainGenerator, generators)
 
-        print "Using generators %s" % ", ".join(i.name for i in generators)
+        log.msg("Using generators %s" % ", ".join(i.name for i in generators))
         self.world.pipeline = generators
 
-        print "Factory init'd"
+        log.msg("Factory successfully initialized for world '%s'!" % name)
 
     def create_entity(self, x, y, z, name, **kwargs):
         self.eid += 1
@@ -147,6 +165,10 @@ class BetaFactory(Factory):
         Spawn a pickup at the specified coordinates.
 
         The coordinates need to be in pixels, not blocks.
+
+        :param tuple coords: coordinates, in pixels
+        :param tuple block: key of block or item to drop
+        :param int quantity: number of blocks to drop in the stack
         """
 
         x, y, z = coords
@@ -155,8 +177,9 @@ class BetaFactory(Factory):
         entity.block = block
         entity.quantity = quantity
 
-        packet = make_packet("pickup", eid=entity.eid, item=block,
-                count=quantity, x=x, y=y, z=z, yaw=0, pitch=0, roll=0)
+        packet = make_packet("pickup", eid=entity.eid, primary=block[0],
+            secondary=block[1], count=quantity, x=x, y=y, z=z, yaw=0, pitch=0,
+            roll=0)
         self.broadcast(packet)
 
         packet = make_packet("create", eid=entity.eid)

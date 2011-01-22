@@ -2,18 +2,26 @@ import random
 import sys
 import weakref
 
-from ampoule import deferToAMPProcess
+from numpy import fromstring, uint8
 
+from twisted.internet import reactor
 from twisted.internet.defer import Deferred, succeed
-from twisted.internet.task import LoopingCall
+from twisted.internet.task import deferLater, LoopingCall
 from twisted.python.filepath import FilePath
-
-from nbt.nbt import NBTFile
 
 from bravo.chunk import Chunk
 from bravo.config import configuration
-from bravo.remote import MakeChunk
 from bravo.serialize import LevelSerializer
+from bravo.serialize import read_from_file, write_to_file, extension
+
+try:
+    from ampoule import deferToAMPProcess
+    from bravo.remote import MakeChunk
+    async = configuration.getboolean("bravo", "ampoule")
+except ImportError:
+    async = False
+
+async = True
 
 def base36(i):
     """
@@ -48,7 +56,7 @@ def names_for_chunk(x, z):
 
     first = base36(x & 63)
     second = base36(z & 63)
-    third = "c.%s.%s.dat" % (base36(x), base36(z))
+    third = "c.%s.%s%s" % (base36(x), base36(z), extension())
 
     return first, second, third
 
@@ -91,12 +99,11 @@ class World(LevelSerializer):
         self.spawn = (0, 0, 0)
         self.seed = random.randint(0, sys.maxint)
 
-        level = self.folder.child("level.dat")
+        level = self.folder.child("level%s" % extension())
         if level.exists() and level.getsize():
-            self.load_from_tag(NBTFile(fileobj=level.open("r")))
+            self.load_from_tag(read_from_file(level.open("r")))
 
-        tag = self.save_to_tag()
-        tag.write_file(fileobj=level.open("w"))
+        write_to_file(self.save_to_tag(), level.open("w"))
 
         self.chunk_management_loop = LoopingCall(self.sort_chunks)
         self.chunk_management_loop.start(1)
@@ -173,17 +180,29 @@ class World(LevelSerializer):
     def request_chunk(self, x, z):
         """
         Request a ``Chunk`` to be delivered later.
+
+        :returns: Deferred that will be called with the Chunk
         """
 
+        if not async:
+            print "wait!"
+            return deferLater(reactor, 0.000001, self.load_chunk, x, z)
+
         if (x, z) in self.chunk_cache:
+            print "in cache", x, z
             return succeed(self.chunk_cache[x, z])
         elif (x, z) in self.dirty_chunk_cache:
+            print "dirty", x, z
             return succeed(self.dirty_chunk_cache[x, z])
         elif (x, z) in self._pending_chunks:
+            print "pending", x, z
             # Rig up another Deferred and wrap it up in a to-go box.
             d = Deferred()
             self._pending_chunks[x, z].chainDeferred(d)
             return d
+
+        print "cannot create chunks on client side"
+        raise ValueError
 
         chunk = Chunk(x, z)
 
@@ -193,8 +212,7 @@ class World(LevelSerializer):
             f.makedirs()
         f = f.child(filename)
         if f.exists() and f.getsize():
-            tag = NBTFile(fileobj=f.open("r"))
-            chunk.load_from_tag(tag)
+            chunk.load_from_tag(read_from_file(f.open("r")))
 
         if chunk.populated:
             self.chunk_cache[x, z] = chunk
@@ -205,18 +223,23 @@ class World(LevelSerializer):
         self._pending_chunks[x, z] = d
 
         def pp(kwargs):
-            chunk.blocks.ravel()[:] = [ord(i) for i in kwargs["blocks"]]
-            chunk.heightmap.ravel()[:] = [ord(i) for i in kwargs["heightmap"]]
-            chunk.metadata.ravel()[:] = [ord(i) for i in kwargs["metadata"]]
-            chunk.skylight.ravel()[:] = [ord(i) for i in kwargs["skylight"]]
-            chunk.blocklight.ravel()[:] = [ord(i) for i in kwargs["blocklight"]]
+            chunk.blocks = fromstring(kwargs["blocks"],
+                dtype=uint8).reshape(chunk.blocks.shape)
+            chunk.heightmap = fromstring(kwargs["heightmap"],
+                dtype=uint8).reshape(chunk.heightmap.shape)
+            chunk.metadata = fromstring(kwargs["metadata"],
+                dtype=uint8).reshape(chunk.metadata.shape)
+            chunk.skylight = fromstring(kwargs["skylight"],
+                dtype=uint8).reshape(chunk.skylight.shape)
+            chunk.blocklight = fromstring(kwargs["blocklight"],
+                dtype=uint8).reshape(chunk.blocklight.shape)
 
             chunk.populated = True
             chunk.dirty = True
 
             # Apply the current season to the chunk.
-            if self.season:
-                self.season.transform(chunk)
+            #if self.season:
+            #    self.season.transform(chunk)
 
             # Since this chunk hasn't been given to any player yet, there's no
             # conceivable way that any meaningful damage has been accumulated;
@@ -241,7 +264,7 @@ class World(LevelSerializer):
 
     def load_chunk(self, x, z):
         """
-        Retrieve a ``Chunk``.
+        Retrieve a ``Chunk`` synchronously.
 
         This method does lots of automatic caching of chunks to ensure that
         disk I/O is kept to a minimum.
@@ -260,8 +283,7 @@ class World(LevelSerializer):
             f.makedirs()
         f = f.child(filename)
         if f.exists() and f.getsize():
-            tag = NBTFile(fileobj=f.open("r"))
-            chunk.load_from_tag(tag)
+            chunk.load_from_tag(read_from_file(f.open("r")))
 
         if chunk.populated:
             self.chunk_cache[x, z] = chunk
@@ -294,8 +316,7 @@ class World(LevelSerializer):
         if not f.exists():
             f.makedirs()
         f = f.child(filename)
-        tag = chunk.save_to_tag()
-        tag.write_file(fileobj=f.open("w"))
+        write_to_file(chunk.save_to_tag(), f.open("w"))
 
         chunk.dirty = False
 
@@ -313,10 +334,9 @@ class World(LevelSerializer):
         f = self.folder.child("players")
         if not f.exists():
             f.makedirs()
-        f = f.child("%s.dat" % username)
+        f = f.child("%s%s" % (username, extension()))
         if f.exists() and f.getsize():
-            tag = NBTFile(fileobj=f.open("r"))
-            player.load_from_tag(tag)
+            player.load_from_tag(read_from_file(f.open("r")))
 
         return player
 
@@ -325,6 +345,5 @@ class World(LevelSerializer):
         f = self.folder.child("players")
         if not f.exists():
             f.makedirs()
-        f = f.child("%s.dat" % username)
-        tag = player.save_to_tag()
-        tag.write_file(fileobj=f.open("w"))
+        f = f.child("%s%s" % (username, extension()))
+        write_to_file(player.save_to_tag(), f.open("w"))
