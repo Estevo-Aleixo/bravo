@@ -1,82 +1,19 @@
-=====
-Bravo
-=====
+==================
+Bravo - Client Mod
+==================
 
+Server
+------
 Bravo is a elegant, speedy, and extensible implementation of the Minecraft
 Alpha/Beta protocol. Only the server side is implemented. Bravo also has a few
 tools useful for examining the wire protocols and disk formats in Minecraft.
 
-Features
-========
+ClientMod
+---------
+Making changes here/there from the official repo so that Bravo can be used
+as a library for a client.  Main changes are to enable decoding of packets
+into objects used by bravo.
 
-Standard Features
------------------
-
- * Console
- * Login and handshake
- * Geometry ("chunk") transfer
- * Location updates
- * Passage of time (day/night)
- * Block construction and deconstruction
- * Entities
-
-   * Players
-   * Pickups
-   * Tiles
-
-     * Chests
-     * Signs
-
- * Lighting
- * Save controls
- * Server-side inventories
-
-Extended Features
------------------
-
- * Pluggable architecture
-
-   * Authentication
-
-     * Offline
-     * Online
-
-   * Commands
-
-     * Inventory control
-     * Teleports
-     * Time of day
-
-   * Geometry generation
-
-     * Erosion
-     * Simplex noise, 2D and 3D
-     * Water table
-
-   * Seasons
-
-     * Spring
-     * Winter
-
- * Chat commands
-
-Planned Features
-================
-
- * More plugins for chat
- * More plugins for admin
- * More terrain generators
- * Metadata (redstone/minecarts)
- * hey0/llama features
-
-   * MOTD and /motd
-   * Ban lists
-   * /lighter
-   * Item spawn mods
-   * /getpos
-   * /compass
-
- * And whatever else we can think of!
 
 Installing
 ==========
@@ -108,41 +45,6 @@ will be automatically detected and is completely optional.
 
  $ pip install ampoule
 
-FAQ
-===
-
-Why are you doing this? What's wrong with the official Alpha server?
- Plenty. The biggest architectural mistake is the choice of dozens of threads
- instead of NIO and an asynchronous event-driven model, but there are other
- problems as well.
-
-Are you implying that the official Alpha server is bad?
- Yes. As previous versions of this FAQ have stated, Notch is a cool guy, but
- the official server is bad.
-
-Are you going to make an open-source client? That would be awesome!
- The server is free, but the client is not. Accordingly, we are not pursuing
- an open-source client at this time. If you want to play Alpha, you should pay
- for it. There's already enough Minecraft piracy going on; we don't feel like
- being part of the problem. That said, Bravo's packet parser and networking
- tools could be used in a client; the license permits it, after all.
-
-Where did the docs go?
- We contribute to the Minecraft Collective's wiki at
- http://mc.kev009.com/wiki/ now, since it allows us to share data faster. All
- general Minecraft data goes to that wiki. Bravo-specific docs are shipped in
- ReST form, and a processed Sphinx version is available online at
- http://mostawesomedude.github.com/bravo/.
-
-Why did you make design decision <X>?
- There's an entire page dedicated to this in the documentation. Look at
- docs/philosophy.rst or http://mostawesomedude.github.com/bravo/philosophy.html.
-
-Who are you guys, anyway?
- Corbin Simpson (MostAwesomeDude) is the main coder. Derrick Dymock (Ac-town)
- is the visionary and provider of network traffic dumps. Ben Kero and Mark
- Harris are the reluctant testers and bug-reporters. The Minecraft Coalition
- has been an invaluable forum for discussion.
 
 License
 =======
