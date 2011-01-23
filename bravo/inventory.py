@@ -1,4 +1,4 @@
-from itertools import chain, izip_longest
+from itertools import chain 
 
 from construct import Container, ListContainer
 
@@ -7,10 +7,10 @@ from bravo.packets import make_packet
 from bravo.plugin import retrieve_plugins
 from bravo.serialize import InventorySerializer
 
-def grouper(n, iterable, fillvalue=None):
-    "grouper(3, 'ABCDEFG', 'x') --> ABC DEF Gxx"
+def grouper(n, iterable):
     args = [iter(iterable)] * n
-    return izip_longest(fillvalue=fillvalue, *args)
+    for i in zip(*args):
+        yield i
 
 def pad_to_stride(recipe, rstride, cstride):
     """
@@ -112,6 +112,26 @@ class Inventory(InventorySerializer):
                 return l, slot
             slot -= len(l)
 
+    def get_filled_slot(self):
+        """
+        Return the first slot with an item.
+        """
+
+        metalist = [self.crafted, self.crafting, self.armor, self.storage,
+            self.holdables]
+
+        slot = 0
+        for l in metalist:
+            if not len(l):
+                continue
+            for item in l:
+                if item == None:
+                    slot += 1
+                    continue
+
+                return slot, item          
+        return None
+
     def load_from_list(self, l):
 
         metalist = [self.crafted, self.crafting, self.armor, self.storage,
@@ -126,15 +146,31 @@ class Inventory(InventorySerializer):
         Load data from a packet container.
         """
 
-        items = [None] * len(self.i)
+        items = [None] * len(container.items)
 
         for i, item in enumerate(container.items):
-            if item.id < 0:
+            if item.primary < 0:
                 items[i] = None
             else:
-                items[i] = item.id, item.damage, item.count
+                items[i] = item.primary, item.secondary, item.count
 
         self.load_from_list(items)
+
+    def update_from_packet(self, container):
+        """
+        Update the inventory from a packet.
+
+        To be used for client functions.  Excepts packet 0x67
+        """
+
+        # after login the server sends wid:255wid, slot:65535, primary:-1
+        # i don't know how to handle this
+        try:
+            l, index = self.container_for_slot(container.slot)
+            l[index] = (container.primary, container.secondary, container.count)
+        except:
+            print "adding container failed"
+            print container
 
     def save_to_packet(self):
         lc = ListContainer()

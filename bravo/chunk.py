@@ -288,6 +288,7 @@ class Chunk(ChunkSerializer):
         """
 
         array = self.blocks.tostring()
+
         array += pack_nibbles(self.metadata)
         array += pack_nibbles(self.skylight)
         array += pack_nibbles(self.blocklight)
@@ -318,7 +319,7 @@ class Chunk(ChunkSerializer):
         # im sure there is a faster operation in numpy than this
         # and by this i mean, the rest of this function
         data = fromstring(packet.data, dtype=uint8)
-       
+
         x = bx
         z = bz
         y = packet.y
@@ -330,7 +331,10 @@ class Chunk(ChunkSerializer):
         z_size -= 1
         y_size -= 1
 
-        for i in xrange(p_index):
+        #print cx, cz, bx, bz
+        #print p_index, x_size, z_size, y_size
+ 
+        for i in xrange(0, p_index):
             #print x, z, y, x_size, z_size, y_size
             self.blocks[x, z, y] = data[i]
 
@@ -345,28 +349,26 @@ class Chunk(ChunkSerializer):
             # metadata, skylight, and blocklight all are packed
             if nibble:
                 self.metadata[x,z,y] = meta_pb
-                #self.skylight[x,z,y] = sky_pb
-                #self.blocklight[x,z,y] = light_pb
+                self.skylight[x,z,y] = sky_pb
+                self.blocklight[x,z,y] = light_pb
             else:
                 m = data[i2 + p_index]
                 self.metadata[x,z,y] = m >> 4
                 meta_pb = m & 15
-
-                #s = data[i2 + sky_index]
-                #self.skylight[x,z,y] = s >> 4
-                #sky_pb = s & 15
-
-                #l = data[i2 + light_index]
-                #self.blocklight[x,z,y] = l >> 4
-                #light_pb = l & 15
+                s = data[i2 + sky_index]
+                self.skylight[x,z,y] = s >> 4
+                sky_pb = s & 15
+                l = data[i2 + light_index]
+                self.blocklight[x,z,y] = l >> 4
+                light_pb = l & 15
 
             y += 1
             if y > y_size:
                 z += 1
                 y = 0
-            if z > z_size:
-                x += 1
-                z = 0
+                if z > z_size:
+                    x += 1
+                    z = 0
 
     def get_block(self, coords):
         """
