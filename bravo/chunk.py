@@ -1,12 +1,12 @@
 from numpy import int8, uint8, uint32
-from numpy import cast, empty, where, zeros, fromstring
+from numpy import cast, empty, where, zeros, fromstring, array
 
 from bravo.blocks import glowing_blocks
 from bravo.compat import product
 from bravo.entity import tile_entities
 from bravo.packets import make_packet
 from bravo.serialize import ChunkSerializer
-from bravo.utilities import pack_nibbles
+from bravo.utilities import pack_nibbles, unpack_nibbles 
 
 # Set up glow tables.
 # These tables provide glow maps for illuminated points.
@@ -117,6 +117,8 @@ class Chunk(ChunkSerializer):
         self.skylight.fill(0xf)
 
         self.tiles = {}
+
+        self.fresh = True
 
         self.damaged = zeros((16, 16, 128), dtype=bool)
         """
@@ -305,70 +307,34 @@ class Chunk(ChunkSerializer):
             print cx, cz, self.x, self.z
             return
 
-        # server always sends the size - 1
+        self.fresh = False
+
+        by = packet.y
+
+        # protocol subtracts 1 before sending to a packet
         x_size = packet.x_size + 1
         y_size = packet.y_size + 1
         z_size = packet.z_size + 1
 
-        # index for reading the packet data
-        p_index = x_size * z_size * y_size
+        ex = bx + x_size
+        ez = bz + z_size
+        ey = by + y_size
 
-        # index for modifying the chunk
-        #c_index = packet.y + (bz * y_size) + (bx * y_size * z_size)
+        # indices for reading the packet data
+        meta_index  = x_size * z_size * y_size
+        sky_index   = meta_index
+        light_index = meta_index * 2
+        
+        # read packet data into an array
+        block_data = fromstring(packet.data[:meta_index], dtype=uint8).reshape(x_size, z_size, y_size)
+        nibbles = array(unpack_nibbles(packet.data[meta_index:]))
 
-        # im sure there is a faster operation in numpy than this
-        # and by this i mean, the rest of this function
-        data = fromstring(packet.data, dtype=uint8)
+        # took me forever to figure this out! 
+        self.blocks[bx:ex, bz:ez, by:ey] = block_data
 
-        x = bx
-        z = bz
-        y = packet.y
-
-        sky_index = p_index + p_index / 2
-        light_index = p_index * 2
-
-        x_size -= 1
-        z_size -= 1
-        y_size -= 1
-
-        #print cx, cz, bx, bz
-        #print p_index, x_size, z_size, y_size
- 
-        for i in xrange(0, p_index):
-            #print x, z, y, x_size, z_size, y_size
-            self.blocks[x, z, y] = data[i]
-
-            # the remaining data is packed as nibbles
-            # so don't advance as quickly as i
-            i2 = i / 2
-
-            # track if we should use the nibble given to us
-            # or to use the one in the buffer
-            nibble = i % 2
-
-            # metadata, skylight, and blocklight all are packed
-            if nibble:
-                self.metadata[x,z,y] = meta_pb
-                self.skylight[x,z,y] = sky_pb
-                self.blocklight[x,z,y] = light_pb
-            else:
-                m = data[i2 + p_index]
-                self.metadata[x,z,y] = m >> 4
-                meta_pb = m & 15
-                s = data[i2 + sky_index]
-                self.skylight[x,z,y] = s >> 4
-                sky_pb = s & 15
-                l = data[i2 + light_index]
-                self.blocklight[x,z,y] = l >> 4
-                light_pb = l & 15
-
-            y += 1
-            if y > y_size:
-                z += 1
-                y = 0
-                if z > z_size:
-                    x += 1
-                    z = 0
+        self.metadata[bx:ex, bz:ez, by:ey] = nibbles[:sky_index].reshape(x_size, z_size, y_size)
+        self.skylight[bx:ex, bz:ez, by:ey] = nibbles[sky_index:light_index].reshape(x_size, z_size, y_size)
+        self.blocklight[bx:ex, bz:ez, by:ey] = nibbles[light_index:].reshape(x_size, z_size, y_size)
 
     def get_block(self, coords):
         """
