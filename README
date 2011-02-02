@@ -1,6 +1,6 @@
-This is an experimental for of the bravo library which adds
+This is an experimental fork of the bravo library which adds
 some features and modifes some others to make it work as a
-client.
+client, instead of a server.
 
 Notable differences are that packet decoding is added to
 a few classes which needed them (i dont remember all the
@@ -10,3 +10,5 @@ connection to the server, and a couple convience functions
 added in places.
 
 I've included a very simple script to get you started.
+---but it won't run. just take a look if you need somewhere
+   to start.  ^_^
